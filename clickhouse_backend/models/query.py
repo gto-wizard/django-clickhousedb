@@ -59,18 +59,21 @@ class QuerySet(query.QuerySet):
             raise ValueError("At least one partition ID is required.")
         clone = self._chain()
         if isinstance(clone.query, sql.Query):
-            clone.query.partition_ids = tuple(partition_ids)
-            clone.query.partition_id_mode = partition_id
+            clone.query.partition_info = sql.PartitionInfo(
+                ids=tuple(partition_ids), id_mode=partition_id
+            )
         return clone
 
     def delete(self):
-        partition_ids = getattr(self.query, "partition_ids", ())
-        if len(partition_ids) > 1:
+        partition_info = getattr(self.query, "partition_info", None)
+        if partition_info and len(partition_info.ids) > 1:
             total_deleted = 0
             all_counts = {}
-            for pid in partition_ids:
+            for pid in partition_info.ids:
                 clone = self.all()
-                clone.query.partition_ids = (pid,)
+                clone.query.partition_info = sql.PartitionInfo(
+                    ids=(pid,), id_mode=partition_info.id_mode
+                )
                 deleted, counts = clone.delete()
                 total_deleted += deleted
                 for key, val in counts.items():
@@ -79,12 +82,14 @@ class QuerySet(query.QuerySet):
         return super().delete()
 
     def update(self, **kwargs):
-        partition_ids = getattr(self.query, "partition_ids", ())
-        if len(partition_ids) > 1:
+        partition_info = getattr(self.query, "partition_info", None)
+        if partition_info and len(partition_info.ids) > 1:
             total = 0
-            for pid in partition_ids:
+            for pid in partition_info.ids:
                 clone = self.all()
-                clone.query.partition_ids = (pid,)
+                clone.query.partition_info = sql.PartitionInfo(
+                    ids=(pid,), id_mode=partition_info.id_mode
+                )
                 total += clone.update(**kwargs)
             return total
         return super().update(**kwargs)

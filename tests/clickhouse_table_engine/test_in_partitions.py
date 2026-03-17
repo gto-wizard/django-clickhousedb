@@ -2,6 +2,8 @@ from datetime import datetime
 
 from django.test import TestCase
 
+from clickhouse_backend.models.sql import PartitionInfo
+
 from . import models
 
 
@@ -102,13 +104,15 @@ class InPartitionsSQLTests(TestCase):
 
     def test_single_partition_delete_sql(self):
         qs = models.Event.objects.filter(protocol="tcp").in_partitions("20240115")
-        self.assertEqual(qs.query.partition_ids, ("20240115",))
-        self.assertFalse(qs.query.partition_id_mode)
+        self.assertEqual(
+            qs.query.partition_info, PartitionInfo(ids=("20240115",), id_mode=False)
+        )
 
     def test_partition_id_mode(self):
         qs = models.Event.objects.in_partitions("abc123", partition_id=True)
-        self.assertEqual(qs.query.partition_ids, ("abc123",))
-        self.assertTrue(qs.query.partition_id_mode)
+        self.assertEqual(
+            qs.query.partition_info, PartitionInfo(ids=("abc123",), id_mode=True)
+        )
 
     def test_empty_partition_ids_raises(self):
         with self.assertRaises(ValueError):
@@ -120,12 +124,16 @@ class InPartitionsSQLTests(TestCase):
             .settings(mutations_sync=2)
             .in_partitions("20240115")
         )
-        self.assertEqual(qs.query.partition_ids, ("20240115",))
+        self.assertEqual(
+            qs.query.partition_info, PartitionInfo(ids=("20240115",), id_mode=False)
+        )
         self.assertEqual(qs.query.setting_info, {"mutations_sync": 2})
 
     def test_in_partitions_via_manager(self):
         qs = models.Event.objects.in_partitions("20240115")
-        self.assertEqual(qs.query.partition_ids, ("20240115",))
+        self.assertEqual(
+            qs.query.partition_info, PartitionInfo(ids=("20240115",), id_mode=False)
+        )
 
 
 class InPartitionsCloneTests(TestCase):
@@ -134,12 +142,13 @@ class InPartitionsCloneTests(TestCase):
     def test_queryset_clone(self):
         qs1 = models.Event.objects.in_partitions("20240115")
         qs2 = qs1.filter(protocol="tcp")
-        self.assertEqual(qs2.query.partition_ids, ("20240115",))
-        self.assertFalse(qs2.query.partition_id_mode)
+        self.assertEqual(
+            qs2.query.partition_info, PartitionInfo(ids=("20240115",), id_mode=False)
+        )
 
     def test_queryset_clone_isolation(self):
         """Cloned querysets don't share partition state."""
         qs1 = models.Event.objects.in_partitions("20240115")
         qs2 = qs1.in_partitions("20240215")
-        self.assertEqual(qs1.query.partition_ids, ("20240115",))
-        self.assertEqual(qs2.query.partition_ids, ("20240215",))
+        self.assertEqual(qs1.query.partition_info.ids, ("20240115",))
+        self.assertEqual(qs2.query.partition_info.ids, ("20240215",))

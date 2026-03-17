@@ -9,6 +9,7 @@ from django.db.models.sql.where import AND
 from clickhouse_backend import compat
 
 ExplainInfo = namedtuple("ExplainInfo", ("format", "type", "options"))
+PartitionInfo = namedtuple("PartitionInfo", ("ids", "id_mode"))
 
 
 class Query(query.Query):
@@ -19,8 +20,7 @@ class Query(query.Query):
             super().__init__(model, where, alias_cols)
         self.setting_info = {}
         self.prewhere = query.WhereNode()
-        self.partition_ids = ()
-        self.partition_id_mode = False
+        self.partition_info = None
 
     def sql_with_params(self):
         """Choose the right db when database router is used."""
@@ -30,8 +30,7 @@ class Query(query.Query):
         obj = super().clone()
         obj.setting_info = self.setting_info.copy()
         obj.prewhere = self.prewhere.clone()
-        obj.partition_ids = self.partition_ids
-        obj.partition_id_mode = self.partition_id_mode
+        obj.partition_info = self.partition_info
         return obj
 
     def explain(self, using, format=None, type=None, **settings):
@@ -142,9 +141,8 @@ def clone_decorator(cls):
         obj = old_clone(self)
         if hasattr(self, "setting_info"):
             obj.setting_info = self.setting_info.copy()
-        if hasattr(self, "partition_ids"):
-            obj.partition_ids = self.partition_ids
-            obj.partition_id_mode = self.partition_id_mode
+        if hasattr(self, "partition_info"):
+            obj.partition_info = self.partition_info
         return obj
 
     cls.clone = clone

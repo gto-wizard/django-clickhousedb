@@ -1,3 +1,3 @@
-from .query import Query
+from .query import PartitionInfo, Query
 
-__all__ = ["Query"]
+__all__ = ["PartitionInfo", "Query"]

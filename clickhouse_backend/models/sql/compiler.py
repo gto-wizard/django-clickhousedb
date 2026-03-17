@@ -60,18 +60,18 @@ class ClickhouseMixin:
         return where, params
 
     def _partition_clause(self):
-        partition_ids = getattr(self.query, "partition_ids", ())
-        if not partition_ids:
-            return ""
-        if len(partition_ids) != 1:
+        partition_info = getattr(self.query, "partition_info", None)
+        if not partition_info:
+            return "", ()
+        if len(partition_info.ids) != 1:
             raise ValueError(
                 "Compiler expects exactly one partition ID. "
                 "Multiple partitions should be handled by the QuerySet."
             )
-        pid = partition_ids[0]
-        if getattr(self.query, "partition_id_mode", False):
-            return "IN PARTITION ID '%s'" % pid
-        return "IN PARTITION '%s'" % pid
+        pid = partition_info.ids[0]
+        if partition_info.id_mode:
+            return "IN PARTITION ID %s", (pid,)
+        return "IN PARTITION %s", (pid,)
 
 
 class SQLCompiler(ClickhouseMixin, compiler.SQLCompiler):
@@ -421,11 +421,11 @@ class SQLDeleteCompiler(ClickhouseMixin, compiler.SQLDeleteCompiler):
             delete = f"ALTER TABLE {local_table} ON CLUSTER {cluster} DELETE"
         else:
             delete = f"ALTER TABLE {table} DELETE"
-        partition = self._partition_clause()
-        if partition:
-            delete = f"{delete} {partition}"
-        where, params = self._compile_where(table)
-        return f"{delete} WHERE {where}", tuple(params)
+        partition_sql, partition_params = self._partition_clause()
+        if partition_sql:
+            delete = f"{delete} {partition_sql}"
+        where, where_params = self._compile_where(table)
+        return f"{delete} WHERE {where}", (*partition_params, *where_params)
 
     def as_sql(self):
         sql, params = super().as_sql()
@@ -502,12 +502,12 @@ class SQLUpdateCompiler(ClickhouseMixin, compiler.SQLUpdateCompiler):
         else:
             result.append(f"ALTER TABLE {table} UPDATE")
         result.append(", ".join(values).replace(table + ".", ""))
-        partition = self._partition_clause()
-        if partition:
-            result.append(partition)
-        where, params = self._compile_where(table)
+        partition_sql, partition_params = self._partition_clause()
+        if partition_sql:
+            result.append(partition_sql)
+        where, where_params = self._compile_where(table)
         result.append(f"WHERE {where}")
-        params = (*update_params, *params)
+        params = (*update_params, *partition_params, *where_params)
         return self._add_settings_sql(" ".join(result), params)
 
 
