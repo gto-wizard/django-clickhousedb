@@ -33,6 +33,9 @@ class ClickhouseManager(models.Manager):
     def prewhere(self, *args, **kwargs):
         return self.get_queryset().prewhere(*args, **kwargs)
 
+    def in_partitions(self, *partition_ids, **kwargs):
+        return self.get_queryset().in_partitions(*partition_ids, **kwargs)
+
     def datetimes(self, *args, **kwargs):
         return self.get_queryset().datetimes(*args, **kwargs)
 

@@ -59,6 +59,20 @@ class ClickhouseMixin:
             where = "TRUE"
         return where, params
 
+    def _partition_clause(self):
+        partition_ids = getattr(self.query, "partition_ids", ())
+        if not partition_ids:
+            return ""
+        if len(partition_ids) != 1:
+            raise ValueError(
+                "Compiler expects exactly one partition ID. "
+                "Multiple partitions should be handled by the QuerySet."
+            )
+        pid = partition_ids[0]
+        if getattr(self.query, "partition_id_mode", False):
+            return "IN PARTITION ID '%s'" % pid
+        return "IN PARTITION '%s'" % pid
+
 
 class SQLCompiler(ClickhouseMixin, compiler.SQLCompiler):
     def pre_sql_setup(self, with_col_aliases=False):
@@ -407,6 +421,9 @@ class SQLDeleteCompiler(ClickhouseMixin, compiler.SQLDeleteCompiler):
             delete = f"ALTER TABLE {local_table} ON CLUSTER {cluster} DELETE"
         else:
             delete = f"ALTER TABLE {table} DELETE"
+        partition = self._partition_clause()
+        if partition:
+            delete = f"{delete} {partition}"
         where, params = self._compile_where(table)
         return f"{delete} WHERE {where}", tuple(params)
 
@@ -485,6 +502,9 @@ class SQLUpdateCompiler(ClickhouseMixin, compiler.SQLUpdateCompiler):
         else:
             result.append(f"ALTER TABLE {table} UPDATE")
         result.append(", ".join(values).replace(table + ".", ""))
+        partition = self._partition_clause()
+        if partition:
+            result.append(partition)
         where, params = self._compile_where(table)
         result.append(f"WHERE {where}")
         params = (*update_params, *params)
