@@ -9,23 +9,30 @@ class InPartitionsDeleteTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.e1 = models.Event.objects.create(
-            ip="1.2.3.4", port=80, protocol="tcp",
-            content="jan", timestamp=datetime(2024, 1, 15),
+            ip="1.2.3.4",
+            port=80,
+            protocol="tcp",
+            content="jan",
+            timestamp=datetime(2024, 1, 15),
         )
         cls.e2 = models.Event.objects.create(
-            ip="5.6.7.8", port=443, protocol="tcp",
-            content="feb", timestamp=datetime(2024, 2, 15),
+            ip="5.6.7.8",
+            port=443,
+            protocol="tcp",
+            content="feb",
+            timestamp=datetime(2024, 2, 15),
         )
         cls.e3 = models.Event.objects.create(
-            ip="9.10.11.12", port=8080, protocol="udp",
-            content="jan2", timestamp=datetime(2024, 1, 20),
+            ip="9.10.11.12",
+            port=8080,
+            protocol="udp",
+            content="jan2",
+            timestamp=datetime(2024, 1, 20),
         )
 
     def test_delete_single_partition(self):
         """Delete scoped to one partition only affects rows in that partition."""
-        models.Event.objects.filter(protocol="tcp").in_partitions(
-            "20240115"
-        ).delete()
+        models.Event.objects.filter(protocol="tcp").in_partitions("20240115").delete()
         remaining_ids = set(models.Event.objects.values_list("id", flat=True))
         # e1 (jan, tcp) should be deleted
         self.assertNotIn(self.e1.id, remaining_ids)
@@ -46,9 +53,7 @@ class InPartitionsDeleteTests(TestCase):
 
     def test_delete_nonexistent_partition(self):
         """Delete in a partition with no matching rows deletes nothing."""
-        models.Event.objects.filter(protocol="tcp").in_partitions(
-            "20230101"
-        ).delete()
+        models.Event.objects.filter(protocol="tcp").in_partitions("20230101").delete()
         self.assertEqual(models.Event.objects.count(), 3)
 
 
@@ -56,19 +61,25 @@ class InPartitionsUpdateTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.e1 = models.Event.objects.create(
-            ip="1.2.3.4", port=80, protocol="tcp",
-            content="jan", timestamp=datetime(2024, 1, 15),
+            ip="1.2.3.4",
+            port=80,
+            protocol="tcp",
+            content="jan",
+            timestamp=datetime(2024, 1, 15),
         )
         cls.e2 = models.Event.objects.create(
-            ip="5.6.7.8", port=443, protocol="tcp",
-            content="feb", timestamp=datetime(2024, 2, 15),
+            ip="5.6.7.8",
+            port=443,
+            protocol="tcp",
+            content="feb",
+            timestamp=datetime(2024, 2, 15),
         )
 
     def test_update_single_partition(self):
         """Update scoped to one partition only affects rows in that partition."""
-        models.Event.objects.filter(protocol="tcp").in_partitions(
-            "20240115"
-        ).update(port=9999)
+        models.Event.objects.filter(protocol="tcp").in_partitions("20240115").update(
+            port=9999
+        )
         self.e1.refresh_from_db()
         self.e2.refresh_from_db()
         self.assertEqual(self.e1.port, 9999)
