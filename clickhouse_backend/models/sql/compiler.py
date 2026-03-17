@@ -376,11 +376,46 @@ class SQLInsertCompiler(compiler.SQLInsertCompiler):
 
 
 class SQLDeleteCompiler(ClickhouseMixin, compiler.SQLDeleteCompiler):
+
+    def _use_lightweight_delete(self):
+        """Use lightweight DELETE when CH >= 23.3, unless opted out."""
+        opts = self.connection.settings_dict.get("OPTIONS", {})
+        if not opts.get("lightweight_delete", True):
+            return False
+        setting_info = getattr(self.query, "setting_info", None)
+        if setting_info and setting_info.get("lightweight_delete") is False:
+            return False
+        return self.connection.get_database_version() >= (23, 3)
+
     def _as_sql(self, query):
-        """
-        When execute DELETE and UPDATE query. Clickhouse does not support
-        "table"."column" in WHERE clause.
-        """
+        if self._use_lightweight_delete():
+            return self._lightweight_delete_sql(query)
+        return self._mutation_delete_sql(query)
+
+    def _lightweight_delete_sql(self, query):
+        """DELETE FROM table [ON CLUSTER cluster] WHERE ..."""
+        table = self.quote_name_unless_alias(query.base_table)
+        engine = getattr(query.model._meta, "engine", None)
+
+        if isinstance(engine, engines.Distributed):
+            cluster = self.quote_name_unless_alias(engine.cluster)
+            local_table = self.quote_name_unless_alias(engine.table)
+            parts = [f"DELETE FROM {local_table} ON CLUSTER {cluster}"]
+        else:
+            parts = [f"DELETE FROM {table}"]
+
+        try:
+            where, params = self.compile(query.where)
+        except FullResultSet:
+            # Full-table delete — fall back to mutation (TRUNCATE-like).
+            return self._mutation_delete_sql(query)
+        # Strip table-qualified column refs — CH lightweight DELETE
+        # internally uses mutations which don't support "table"."col".
+        where = where.replace(table + ".", "")
+        return f"{' '.join(parts)} WHERE {where}", tuple(params)
+
+    def _mutation_delete_sql(self, query):
+        """ALTER TABLE table [ON CLUSTER cluster] DELETE WHERE ... (legacy)"""
         table = self.quote_name_unless_alias(query.base_table)
         engine = getattr(query.model._meta, "engine", None)
         if isinstance(engine, engines.Distributed):
@@ -394,19 +429,53 @@ class SQLDeleteCompiler(ClickhouseMixin, compiler.SQLDeleteCompiler):
 
     def as_sql(self):
         sql, params = super().as_sql()
+        # Filter synthetic lightweight_delete key before passing to CH
+        original_settings = getattr(self.query, "setting_info", None)
+        if original_settings and "lightweight_delete" in original_settings:
+            self.query.setting_info = {
+                k: v
+                for k, v in original_settings.items()
+                if k != "lightweight_delete"
+            }
         sql, params = self._add_settings_sql(sql, params)
+        if original_settings is not None:
+            self.query.setting_info = original_settings
         return sql, params
 
 
 class SQLUpdateCompiler(ClickhouseMixin, compiler.SQLUpdateCompiler):
+
+    def _use_lightweight_update(self):
+        """Use lightweight UPDATE when CH >= 25.7 and explicitly opted in.
+
+        Lightweight UPDATE requires tables to have enable_block_number_column
+        and enable_block_offset_column settings. Since this can't be detected
+        cheaply and existing tables won't have them, default is OFF.
+        Opt in via DATABASE OPTIONS {"lightweight_update": True} or
+        per-query .settings(lightweight_update=True).
+        """
+        if self.connection.get_database_version() < (25, 7):
+            return False
+        opts = self.connection.settings_dict.get("OPTIONS", {})
+        if opts.get("lightweight_update", False):
+            # Database-level opt-in, allow per-query opt-out
+            setting_info = getattr(self.query, "setting_info", None)
+            if setting_info and setting_info.get("lightweight_update") is False:
+                return False
+            return True
+        # Per-query opt-in
+        setting_info = getattr(self.query, "setting_info", None)
+        if setting_info and setting_info.get("lightweight_update") is True:
+            return True
+        return False
+
     def as_sql(self):
-        """
-        When execute DELETE and UPDATE query. Clickhouse does not support
-        "table"."column" in WHERE clause.
-        """
-        self.pre_sql_setup()
-        if not self.query.values:
-            return "", ()
+        if self._use_lightweight_update():
+            return self._lightweight_update_sql()
+        return self._mutation_update_sql()
+
+    def _compile_values(self):
+        """Extract value compilation (shared by both paths)."""
         qn = self.quote_name_unless_alias
         values, update_params = [], []
         for field, model, val in self.query.values:
@@ -437,10 +506,8 @@ class SQLUpdateCompiler(ClickhouseMixin, compiler.SQLUpdateCompiler):
                         % (field, val, field.__class__.__name__)
                     )
             else:
-                # update params are formatted into query string.
                 val = field.get_db_prep_value(val, connection=self.connection)
 
-            # Getting the placeholder for the field.
             if hasattr(field, "get_placeholder"):
                 placeholder = field.get_placeholder(val, self, self.connection)
             else:
@@ -455,8 +522,50 @@ class SQLUpdateCompiler(ClickhouseMixin, compiler.SQLUpdateCompiler):
                 update_params.append(val)
             else:
                 values.append("%s = NULL" % qn(name))
+        return values, update_params
 
-        # Replace "table"."field" to "field", clickhouse does not support that.
+    def _lightweight_update_sql(self):
+        """UPDATE table [ON CLUSTER cluster] SET ... WHERE ..."""
+        self.pre_sql_setup()
+        if not self.query.values:
+            return "", ()
+
+        qn = self.quote_name_unless_alias
+        values, update_params = self._compile_values()
+
+        table = qn(self.query.base_table)
+        engine = getattr(self.query.model._meta, "engine", None)
+
+        if isinstance(engine, engines.Distributed):
+            cluster = qn(engine.cluster)
+            local_table = qn(engine.table)
+            result = [f"UPDATE {local_table} ON CLUSTER {cluster} SET"]
+        else:
+            result = [f"UPDATE {table} SET"]
+
+        # Strip table-qualified column refs — CH lightweight UPDATE
+        # internally uses mutations which don't support "table"."col".
+        result.append(", ".join(values).replace(table + ".", ""))
+
+        try:
+            where, params = self.compile(self.query.where)
+        except FullResultSet:
+            where, params = "TRUE", ()
+        where = where.replace(table + ".", "")
+        result.append(f"WHERE {where}")
+        params = (*update_params, *params)
+
+        return self._filter_and_add_settings(" ".join(result), params)
+
+    def _mutation_update_sql(self):
+        """ALTER TABLE table UPDATE ... WHERE ... (legacy mutation path)."""
+        self.pre_sql_setup()
+        if not self.query.values:
+            return "", ()
+
+        qn = self.quote_name_unless_alias
+        values, update_params = self._compile_values()
+
         result = []
         table = qn(self.query.base_table)
         engine = getattr(self.query.model._meta, "engine", None)
@@ -470,7 +579,22 @@ class SQLUpdateCompiler(ClickhouseMixin, compiler.SQLUpdateCompiler):
         where, params = self._compile_where(table)
         result.append(f"WHERE {where}")
         params = (*update_params, *params)
-        return self._add_settings_sql(" ".join(result), params)
+
+        return self._filter_and_add_settings(" ".join(result), params)
+
+    def _filter_and_add_settings(self, sql, params):
+        """Filter synthetic keys, then add SETTINGS clause."""
+        original_settings = getattr(self.query, "setting_info", None)
+        if original_settings and "lightweight_update" in original_settings:
+            self.query.setting_info = {
+                k: v
+                for k, v in original_settings.items()
+                if k != "lightweight_update"
+            }
+        sql, params = self._add_settings_sql(sql, params)
+        if original_settings is not None:
+            self.query.setting_info = original_settings
+        return sql, params
 
 
 class SQLAggregateCompiler(ClickhouseMixin, compiler.SQLAggregateCompiler):

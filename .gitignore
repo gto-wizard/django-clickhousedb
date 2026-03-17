@@ -6,6 +6,7 @@
 venv
 **/__pycache__
 django_clickhouse_backend.egg-info
+django_clickhousedb.egg-info
 build
 dist
 tests/unsupported/

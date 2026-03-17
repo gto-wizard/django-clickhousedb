@@ -325,11 +325,10 @@ time.sleep(1)
 assert Event.objects.filter(protocol="TCP").count() == 3
 ```
 
-delete
+delete — uses lightweight DELETE by default on ClickHouse >= 23.3 (no sleep needed)
 
 ```python
 Event.objects.filter(protocol="TCP").delete()
-time.sleep(1)
 assert not Event.objects.filter(protocol="TCP").exists()
 ```
 
@@ -342,6 +341,11 @@ Writing testcase is all the same as normal django project. You can use django Te
 By default, data mutations is processed asynchronously.
 That is, when you update or delete a row, clickhouse will perform the action after a period of time.
 So you should change this default behavior in testing for deleting or updating.
+
+> **Note:** Lightweight DELETE (enabled by default on CH >= 23.3) is synchronous — no
+> `mutations_sync` or `time.sleep` needed for deletes. The settings below are only
+> required for mutation-based operations (updates, or deletes with `lightweight_delete=False`).
+
 There are 2 ways to do that:
 
 - Config database engine as follows, this sets [`mutations_sync=1`](https://clickhouse.com/docs/en/operations/settings/settings#mutations_sync) at session scope.
