@@ -19,6 +19,8 @@ class Query(query.Query):
             super().__init__(model, where, alias_cols)
         self.setting_info = {}
         self.prewhere = query.WhereNode()
+        self.partition_ids = ()
+        self.partition_id_mode = False
 
     def sql_with_params(self):
         """Choose the right db when database router is used."""
@@ -28,6 +30,8 @@ class Query(query.Query):
         obj = super().clone()
         obj.setting_info = self.setting_info.copy()
         obj.prewhere = self.prewhere.clone()
+        obj.partition_ids = self.partition_ids
+        obj.partition_id_mode = self.partition_id_mode
         return obj
 
     def explain(self, using, format=None, type=None, **settings):
@@ -136,8 +140,11 @@ def clone_decorator(cls):
 
     def clone(self):
         obj = old_clone(self)
-        if hasattr(obj, "setting_info"):
+        if hasattr(self, "setting_info"):
             obj.setting_info = self.setting_info.copy()
+        if hasattr(self, "partition_ids"):
+            obj.partition_ids = self.partition_ids
+            obj.partition_id_mode = self.partition_id_mode
         return obj
 
     cls.clone = clone
