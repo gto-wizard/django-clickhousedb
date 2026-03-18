@@ -118,8 +118,8 @@ class BaseMergeTree(Engine):
             "enable_mixed_granularity_parts",
             "use_minimalistic_part_header_in_zookeeper",
             "write_final_mark",
-            "enable_block_number_column",   # Required for lightweight UPDATE (CH 25.7+)
-            "enable_block_offset_column",   # Required for lightweight UPDATE (CH 25.7+)
+            "enable_block_number_column",  # Required for lightweight UPDATE (CH 25.7+)
+            "enable_block_offset_column",  # Required for lightweight UPDATE (CH 25.7+)
         ],
         _check_str: ["storage_policy"],
     }

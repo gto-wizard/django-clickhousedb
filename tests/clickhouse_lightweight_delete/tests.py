@@ -23,9 +23,7 @@ class LightweightDeleteTests(TestCase):
     def test_mutation_delete_on_opt_out_per_query(self):
         """Per-query opt-out falls back to mutation syntax."""
         LightweightEvent.objects.create(name="a", value=1)
-        qs = LightweightEvent.objects.filter(value=1).settings(
-            lightweight_delete=False
-        )
+        qs = LightweightEvent.objects.filter(value=1).settings(lightweight_delete=False)
         with CaptureQueriesContext(connection) as ctx:
             qs.delete()
         delete_sql = [q["sql"] for q in ctx if "DELETE" in q["sql"]]
@@ -93,9 +91,7 @@ class LightweightDeleteTests(TestCase):
         self.assertTrue(delete_sql)
         # Check SETTINGS clause specifically — table name contains "lightweight_delete"
         settings_part = (
-            delete_sql[0].split("SETTINGS")[-1]
-            if "SETTINGS" in delete_sql[0]
-            else ""
+            delete_sql[0].split("SETTINGS")[-1] if "SETTINGS" in delete_sql[0] else ""
         )
         self.assertNotIn("lightweight_delete", settings_part)
 
@@ -202,9 +198,7 @@ class LightweightUpdateTests(TestCase):
         update_sql = [q["sql"] for q in ctx if q["sql"].startswith("UPDATE")]
         self.assertTrue(update_sql)
         settings_part = (
-            update_sql[0].split("SETTINGS")[-1]
-            if "SETTINGS" in update_sql[0]
-            else ""
+            update_sql[0].split("SETTINGS")[-1] if "SETTINGS" in update_sql[0] else ""
         )
         self.assertNotIn("lightweight_update", settings_part)
 
@@ -228,9 +222,7 @@ class LightweightUpdateTests(TestCase):
         """Integration: mutation update works (default path)."""
         LightweightEvent.objects.create(name="original", value=10)
         LightweightEvent.objects.filter(value=10).update(name="mutated")
-        self.assertEqual(
-            LightweightEvent.objects.filter(name="mutated").count(), 1
-        )
+        self.assertEqual(LightweightEvent.objects.filter(name="mutated").count(), 1)
 
 
 class FeatureTests(TestCase):

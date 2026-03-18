@@ -376,7 +376,6 @@ class SQLInsertCompiler(compiler.SQLInsertCompiler):
 
 
 class SQLDeleteCompiler(ClickhouseMixin, compiler.SQLDeleteCompiler):
-
     def _use_lightweight_delete(self):
         """Use lightweight DELETE when CH >= 23.3, unless opted out."""
         opts = self.connection.settings_dict.get("OPTIONS", {})
@@ -433,9 +432,7 @@ class SQLDeleteCompiler(ClickhouseMixin, compiler.SQLDeleteCompiler):
         original_settings = getattr(self.query, "setting_info", None)
         if original_settings and "lightweight_delete" in original_settings:
             self.query.setting_info = {
-                k: v
-                for k, v in original_settings.items()
-                if k != "lightweight_delete"
+                k: v for k, v in original_settings.items() if k != "lightweight_delete"
             }
         sql, params = self._add_settings_sql(sql, params)
         if original_settings is not None:
@@ -444,7 +441,6 @@ class SQLDeleteCompiler(ClickhouseMixin, compiler.SQLDeleteCompiler):
 
 
 class SQLUpdateCompiler(ClickhouseMixin, compiler.SQLUpdateCompiler):
-
     def _use_lightweight_update(self):
         """Use lightweight UPDATE when CH >= 25.7 and explicitly opted in.
 
@@ -587,9 +583,7 @@ class SQLUpdateCompiler(ClickhouseMixin, compiler.SQLUpdateCompiler):
         original_settings = getattr(self.query, "setting_info", None)
         if original_settings and "lightweight_update" in original_settings:
             self.query.setting_info = {
-                k: v
-                for k, v in original_settings.items()
-                if k != "lightweight_update"
+                k: v for k, v in original_settings.items() if k != "lightweight_update"
             }
         sql, params = self._add_settings_sql(sql, params)
         if original_settings is not None:
