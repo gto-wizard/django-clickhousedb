@@ -13,6 +13,7 @@ class Query(query.Query):
     def __init__(self, model, alias_cols=True):
         super().__init__(model, alias_cols)
         self.setting_info = {}
+        self.compiler_options = {}
         self.prewhere = query.WhereNode()
 
     def sql_with_params(self):
@@ -22,6 +23,7 @@ class Query(query.Query):
     def clone(self):
         obj = super().clone()
         obj.setting_info = self.setting_info.copy()
+        obj.compiler_options = self.compiler_options.copy()
         obj.prewhere = self.prewhere.clone()
         return obj
 
@@ -125,8 +127,9 @@ def clone_decorator(cls):
 
     def clone(self):
         obj = old_clone(self)
-        if hasattr(obj, "setting_info"):
-            obj.setting_info = self.setting_info.copy()
+        for attr in ("setting_info", "compiler_options"):
+            if hasattr(self, attr):
+                setattr(obj, attr, getattr(self, attr).copy())
         return obj
 
     cls.clone = clone

@@ -20,6 +20,12 @@ class QuerySet(query.QuerySet):
             clone.query.setting_info.update(kwargs)
         return clone
 
+    def compile_with(self, **kwargs):
+        clone = self._chain()
+        if isinstance(clone.query, sql.Query):
+            clone.query.compiler_options.update(kwargs)
+        return clone
+
     def prewhere(self, *args, **kwargs):
         """
         Return a new QuerySet instance with the args ANDed to the existing
@@ -56,6 +62,9 @@ class QuerySet(query.QuerySet):
         setting_info = getattr(self.query, "setting_info", None)
         if setting_info:
             query.setting_info = setting_info
+        compiler_options = getattr(self.query, "compiler_options", None)
+        if compiler_options:
+            query.compiler_options = compiler_options
         query.insert_values(fields, objs, raw=raw)
         return query.get_compiler(using=using).execute_sql(returning_fields)
 

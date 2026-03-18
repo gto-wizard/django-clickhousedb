@@ -23,7 +23,9 @@ class LightweightDeleteTests(TestCase):
     def test_mutation_delete_on_opt_out_per_query(self):
         """Per-query opt-out falls back to mutation syntax."""
         LightweightEvent.objects.create(name="a", value=1)
-        qs = LightweightEvent.objects.filter(value=1).settings(lightweight_delete=False)
+        qs = LightweightEvent.objects.filter(value=1).compile_with(
+            lightweight_delete=False
+        )
         with CaptureQueriesContext(connection) as ctx:
             qs.delete()
         delete_sql = [q["sql"] for q in ctx if "DELETE" in q["sql"]]
@@ -34,15 +36,15 @@ class LightweightDeleteTests(TestCase):
         """Database-level opt-out falls back to mutation syntax."""
         LightweightEvent.objects.create(name="a", value=1)
         try:
-            connection.settings_dict.setdefault("OPTIONS", {})
-            connection.settings_dict["OPTIONS"]["lightweight_delete"] = False
+            connection.settings_dict.setdefault("COMPILER_OPTIONS", {})
+            connection.settings_dict["COMPILER_OPTIONS"]["lightweight_delete"] = False
             with CaptureQueriesContext(connection) as ctx:
                 LightweightEvent.objects.filter(value=1).delete()
             delete_sql = [q["sql"] for q in ctx if "DELETE" in q["sql"]]
             self.assertTrue(delete_sql)
             self.assertTrue(delete_sql[0].startswith("ALTER TABLE"))
         finally:
-            connection.settings_dict["OPTIONS"].pop("lightweight_delete", None)
+            connection.settings_dict["COMPILER_OPTIONS"].pop("lightweight_delete", None)
 
     def test_lightweight_delete_distributed(self):
         """Distributed model should produce DELETE FROM local ON CLUSTER."""
@@ -79,11 +81,13 @@ class LightweightDeleteTests(TestCase):
         self.assertTrue(delete_sql)
         self.assertTrue(delete_sql[0].startswith("ALTER TABLE"))
 
-    def test_lightweight_delete_synthetic_key_filtered(self):
-        """The lightweight_delete key should not be passed to ClickHouse SETTINGS."""
+    def test_compile_with_does_not_leak_to_settings(self):
+        """compile_with flags should not appear in the SETTINGS clause."""
         LightweightEvent.objects.create(name="a", value=1)
-        qs = LightweightEvent.objects.filter(value=1).settings(
-            lightweight_delete=True, mutations_sync=2
+        qs = (
+            LightweightEvent.objects.filter(value=1)
+            .compile_with(lightweight_delete=True)
+            .settings(mutations_sync=2)
         )
         with CaptureQueriesContext(connection) as ctx:
             qs.delete()
@@ -104,6 +108,23 @@ class LightweightDeleteTests(TestCase):
         LightweightEvent.objects.filter(value__gte=2).delete()
         self.assertEqual(LightweightEvent.objects.count(), 1)
         self.assertEqual(LightweightEvent.objects.first().name, "keep")
+
+    def test_db_opt_out_per_query_override_in(self):
+        """DB-level opt-out can be overridden to opt-in per-query."""
+        LightweightEvent.objects.create(name="a", value=1)
+        try:
+            connection.settings_dict.setdefault("COMPILER_OPTIONS", {})
+            connection.settings_dict["COMPILER_OPTIONS"]["lightweight_delete"] = False
+            qs = LightweightEvent.objects.filter(value=1).compile_with(
+                lightweight_delete=True
+            )
+            with CaptureQueriesContext(connection) as ctx:
+                qs.delete()
+            delete_sql = [q["sql"] for q in ctx if q["sql"].startswith("DELETE")]
+            self.assertTrue(delete_sql, "Expected a DELETE FROM query")
+            self.assertNotIn("ALTER TABLE", delete_sql[0])
+        finally:
+            connection.settings_dict["COMPILER_OPTIONS"].pop("lightweight_delete", None)
 
 
 class LightweightUpdateTests(TestCase):
@@ -126,7 +147,7 @@ class LightweightUpdateTests(TestCase):
         if not self._ch_version_gte_25_7():
             self.skipTest("Requires ClickHouse >= 25.7")
         LightweightUpdateEvent.objects.create(name="a", value=1)
-        qs = LightweightUpdateEvent.objects.filter(value=1).settings(
+        qs = LightweightUpdateEvent.objects.filter(value=1).compile_with(
             lightweight_update=True
         )
         with CaptureQueriesContext(connection) as ctx:
@@ -142,15 +163,15 @@ class LightweightUpdateTests(TestCase):
             self.skipTest("Requires ClickHouse >= 25.7")
         LightweightUpdateEvent.objects.create(name="a", value=1)
         try:
-            connection.settings_dict.setdefault("OPTIONS", {})
-            connection.settings_dict["OPTIONS"]["lightweight_update"] = True
+            connection.settings_dict.setdefault("COMPILER_OPTIONS", {})
+            connection.settings_dict["COMPILER_OPTIONS"]["lightweight_update"] = True
             with CaptureQueriesContext(connection) as ctx:
                 LightweightUpdateEvent.objects.filter(value=1).update(name="b")
             update_sql = [q["sql"] for q in ctx if q["sql"].startswith("UPDATE")]
             self.assertTrue(update_sql, "Expected an UPDATE query")
             self.assertNotIn("ALTER TABLE", update_sql[0])
         finally:
-            connection.settings_dict["OPTIONS"].pop("lightweight_update", None)
+            connection.settings_dict["COMPILER_OPTIONS"].pop("lightweight_update", None)
 
     def test_database_opt_in_per_query_opt_out(self):
         """Database-level opt-in can be overridden per-query."""
@@ -158,9 +179,9 @@ class LightweightUpdateTests(TestCase):
             self.skipTest("Requires ClickHouse >= 25.7")
         LightweightUpdateEvent.objects.create(name="a", value=1)
         try:
-            connection.settings_dict.setdefault("OPTIONS", {})
-            connection.settings_dict["OPTIONS"]["lightweight_update"] = True
-            qs = LightweightUpdateEvent.objects.filter(value=1).settings(
+            connection.settings_dict.setdefault("COMPILER_OPTIONS", {})
+            connection.settings_dict["COMPILER_OPTIONS"]["lightweight_update"] = True
+            qs = LightweightUpdateEvent.objects.filter(value=1).compile_with(
                 lightweight_update=False
             )
             with CaptureQueriesContext(connection) as ctx:
@@ -169,15 +190,17 @@ class LightweightUpdateTests(TestCase):
             self.assertTrue(update_sql)
             self.assertTrue(update_sql[0].startswith("ALTER TABLE"))
         finally:
-            connection.settings_dict["OPTIONS"].pop("lightweight_update", None)
+            connection.settings_dict["COMPILER_OPTIONS"].pop("lightweight_update", None)
 
     def test_lightweight_update_with_settings(self):
         """SETTINGS should be appended after WHERE clause."""
         if not self._ch_version_gte_25_7():
             self.skipTest("Requires ClickHouse >= 25.7")
         LightweightUpdateEvent.objects.create(name="a", value=1)
-        qs = LightweightUpdateEvent.objects.filter(value=1).settings(
-            lightweight_update=True, mutations_sync=2
+        qs = (
+            LightweightUpdateEvent.objects.filter(value=1)
+            .compile_with(lightweight_update=True)
+            .settings(mutations_sync=2)
         )
         with CaptureQueriesContext(connection) as ctx:
             qs.update(name="b")
@@ -185,13 +208,15 @@ class LightweightUpdateTests(TestCase):
         self.assertTrue(update_sql)
         self.assertIn("SETTINGS", update_sql[0])
 
-    def test_lightweight_update_synthetic_key_filtered(self):
-        """The lightweight_update key should not be passed to ClickHouse SETTINGS."""
+    def test_compile_with_does_not_leak_to_settings(self):
+        """compile_with flags should not appear in the SETTINGS clause."""
         if not self._ch_version_gte_25_7():
             self.skipTest("Requires ClickHouse >= 25.7")
         LightweightUpdateEvent.objects.create(name="a", value=1)
-        qs = LightweightUpdateEvent.objects.filter(value=1).settings(
-            lightweight_update=True, mutations_sync=2
+        qs = (
+            LightweightUpdateEvent.objects.filter(value=1)
+            .compile_with(lightweight_update=True)
+            .settings(mutations_sync=2)
         )
         with CaptureQueriesContext(connection) as ctx:
             qs.update(name="b")
@@ -208,7 +233,7 @@ class LightweightUpdateTests(TestCase):
             self.skipTest("Requires ClickHouse >= 25.7")
         LightweightUpdateEvent.objects.create(name="original", value=1)
         LightweightUpdateEvent.objects.create(name="original", value=2)
-        LightweightUpdateEvent.objects.filter(value=1).settings(
+        LightweightUpdateEvent.objects.filter(value=1).compile_with(
             lightweight_update=True
         ).update(name="updated")
         self.assertEqual(

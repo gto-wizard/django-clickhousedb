@@ -378,11 +378,14 @@ class SQLInsertCompiler(compiler.SQLInsertCompiler):
 class SQLDeleteCompiler(ClickhouseMixin, compiler.SQLDeleteCompiler):
     def _use_lightweight_delete(self):
         """Use lightweight DELETE when CH >= 23.3, unless opted out."""
-        opts = self.connection.settings_dict.get("OPTIONS", {})
-        if not opts.get("lightweight_delete", True):
+        compiler_opts = self.connection.settings_dict.get("COMPILER_OPTIONS", {})
+        query_opts = getattr(self.query, "compiler_options", {})
+        if not compiler_opts.get("lightweight_delete", True):
+            # DB-level opt-out; per-query can still override
+            if query_opts.get("lightweight_delete") is True:
+                return self.connection.get_database_version() >= (23, 3)
             return False
-        setting_info = getattr(self.query, "setting_info", None)
-        if setting_info and setting_info.get("lightweight_delete") is False:
+        if query_opts.get("lightweight_delete") is False:
             return False
         return self.connection.get_database_version() >= (23, 3)
 
@@ -428,15 +431,7 @@ class SQLDeleteCompiler(ClickhouseMixin, compiler.SQLDeleteCompiler):
 
     def as_sql(self):
         sql, params = super().as_sql()
-        # Filter synthetic lightweight_delete key before passing to CH
-        original_settings = getattr(self.query, "setting_info", None)
-        if original_settings and "lightweight_delete" in original_settings:
-            self.query.setting_info = {
-                k: v for k, v in original_settings.items() if k != "lightweight_delete"
-            }
         sql, params = self._add_settings_sql(sql, params)
-        if original_settings is not None:
-            self.query.setting_info = original_settings
         return sql, params
 
 
@@ -447,23 +442,17 @@ class SQLUpdateCompiler(ClickhouseMixin, compiler.SQLUpdateCompiler):
         Lightweight UPDATE requires tables to have enable_block_number_column
         and enable_block_offset_column settings. Since this can't be detected
         cheaply and existing tables won't have them, default is OFF.
-        Opt in via DATABASE OPTIONS {"lightweight_update": True} or
-        per-query .settings(lightweight_update=True).
+        Opt in via DATABASE COMPILER_OPTIONS {"lightweight_update": True} or
+        per-query .compile_with(lightweight_update=True).
         """
         if self.connection.get_database_version() < (25, 7):
             return False
-        opts = self.connection.settings_dict.get("OPTIONS", {})
-        if opts.get("lightweight_update", False):
-            # Database-level opt-in, allow per-query opt-out
-            setting_info = getattr(self.query, "setting_info", None)
-            if setting_info and setting_info.get("lightweight_update") is False:
-                return False
-            return True
-        # Per-query opt-in
-        setting_info = getattr(self.query, "setting_info", None)
-        if setting_info and setting_info.get("lightweight_update") is True:
-            return True
-        return False
+        compiler_opts = self.connection.settings_dict.get("COMPILER_OPTIONS", {})
+        query_opts = getattr(self.query, "compiler_options", {})
+        if compiler_opts.get("lightweight_update", False):
+            # Database-level opt-in; per-query can override
+            return query_opts.get("lightweight_update") is not False
+        return query_opts.get("lightweight_update") is True
 
     def as_sql(self):
         if self._use_lightweight_update():
@@ -579,16 +568,7 @@ class SQLUpdateCompiler(ClickhouseMixin, compiler.SQLUpdateCompiler):
         return self._filter_and_add_settings(" ".join(result), params)
 
     def _filter_and_add_settings(self, sql, params):
-        """Filter synthetic keys, then add SETTINGS clause."""
-        original_settings = getattr(self.query, "setting_info", None)
-        if original_settings and "lightweight_update" in original_settings:
-            self.query.setting_info = {
-                k: v for k, v in original_settings.items() if k != "lightweight_update"
-            }
-        sql, params = self._add_settings_sql(sql, params)
-        if original_settings is not None:
-            self.query.setting_info = original_settings
-        return sql, params
+        return self._add_settings_sql(sql, params)
 
 
 class SQLAggregateCompiler(ClickhouseMixin, compiler.SQLAggregateCompiler):
