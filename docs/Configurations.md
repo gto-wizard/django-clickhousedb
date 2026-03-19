@@ -26,6 +26,10 @@ Only `ENGINE` is required in `DATABASES` configuration, other options have defau
           'OPTIONS': {
               'settings': {'mutations_sync': 1}
           },
+          'COMPILER_OPTIONS': {
+              'lightweight_delete': True,
+              'lightweight_update': False,
+          },
           'TEST': {
               'fake_transaction': True
           }
@@ -44,6 +48,22 @@ Because [source code of DBAPI Connection](https://github.com/mymarilyn/clickhous
 - `dsn` provide connection url, for example `clickhouse://localhost/test?param1=value1&...`. If dsn is provided, all other connection parameters are ignored.
 - All other [clickhouse_driver.connection.Connection](https://clickhouse-driver.readthedocs.io/en/latest/api.html#connection) parameters.
 - `settings` can contain [clickhouse_driver.Client](https://clickhouse-driver.readthedocs.io/en/latest/api.html?highlight=client#clickhouse_driver.Client) settings and [clickhouse settings](https://clickhouse.com/docs/en/operations/settings/settings).
+Valid `COMPILER_OPTIONS` keys:
+
+Compiler options control which SQL dialect the Django compiler emits. They are separate from
+ClickHouse server settings (`OPTIONS`) and never appear in the `SETTINGS` clause of generated SQL.
+
+- `lightweight_delete` (bool, default `True`): Use lightweight `DELETE FROM` syntax instead of
+  `ALTER TABLE ... DELETE` mutations on ClickHouse >= 23.3. Lightweight deletes mark rows as
+  deleted in-place rather than rewriting data parts — significantly faster. Falls back to
+  mutations for full-table deletes (no WHERE clause) or when ClickHouse version < 23.3.
+  Can also be controlled per-query: `.compile_with(lightweight_delete=False)`.
+- `lightweight_update` (bool, default `False`): Use lightweight `UPDATE` syntax instead of
+  `ALTER TABLE ... UPDATE` mutations on ClickHouse >= 25.7. **Requires tables to have
+  `enable_block_number_column=1` and `enable_block_offset_column=1` engine settings** — without
+  these, ClickHouse rejects the query. Default is `False` because existing tables won't have
+  these settings. Enable per-table first, then opt in here or per-query:
+  `.compile_with(lightweight_update=True)`.
 
 > *Changed in version 1.3.2:* Add `max_block_size`, refer [#108](https://github.com/jayvynl/django-clickhouse-backend/issues/108).
 

@@ -30,6 +30,9 @@ class ClickhouseManager(models.Manager):
     def settings(self, **kwargs):
         return self.get_queryset().settings(**kwargs)
 
+    def compile_with(self, **kwargs):
+        return self.get_queryset().compile_with(**kwargs)
+
     def prewhere(self, *args, **kwargs):
         return self.get_queryset().prewhere(*args, **kwargs)
 

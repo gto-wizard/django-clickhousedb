@@ -37,7 +37,7 @@ python tests/runtests.py clickhouse_fields.test_arrayfield.TestArrayField
 - **Backend entry point**: `clickhouse_backend/backend/` -- Django discovers via `ENGINE = "clickhouse_backend.backend"`
 - **All user-facing imports**: `from clickhouse_backend import models` (fields, engines, functions, indexes, base model)
 - **Monkey-patches**: `patch_all()` in `clickhouse_backend/patch/__init__.py` runs at backend import time, modifying Django's MigrationRecorder, Now/Random functions, and AutoField behavior
-- **SQL compilers**: `clickhouse_backend/models/sql/compiler.py` -- UPDATE/DELETE generate `ALTER TABLE ... UPDATE/DELETE WHERE` (ClickHouse mutations)
+- **SQL compilers**: `clickhouse_backend/models/sql/compiler.py` -- DELETE uses lightweight `DELETE FROM` (CH >= 23.3, default on) or `ALTER TABLE ... DELETE` mutations. UPDATE uses `ALTER TABLE ... UPDATE` mutations by default; lightweight `UPDATE` (CH >= 25.7) is opt-in via `OPTIONS.lightweight_update` (requires `enable_block_number_column` table setting).
 - **Connection pool**: `clickhouse_backend/driver/pool.py` -- thread-safe pool, one shared physical connection per DB alias
 - **ID generation**: `clickhouse_backend/idworker/snowflake.py` -- Snowflake IDs for AutoField PKs (no auto-increment in ClickHouse)
 - **No transactions**: commit/rollback/savepoints are no-ops; `fake_transaction` exists only for test isolation

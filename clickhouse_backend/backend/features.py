@@ -160,6 +160,14 @@ class DatabaseFeatures(BaseDatabaseFeatures):
         return self.fake_transaction
 
     @cached_property
+    def supports_lightweight_delete(self):
+        return self.connection.get_database_version() >= (23, 3)
+
+    @cached_property
+    def supports_lightweight_update(self):
+        return self.connection.get_database_version() >= (25, 7)
+
+    @cached_property
     def django_test_skips(self):
         skips = {}
         version = self.connection.get_database_version()
