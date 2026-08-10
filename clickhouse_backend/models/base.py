@@ -4,6 +4,7 @@ from django.db.models import options
 
 from .query import QuerySet
 from .sql import Query
+from clickhouse_backend import compat
 
 # WHY THIS PATCH EXISTS:
 # Django's ModelState.from_model() iterates DEFAULT_NAMES to capture Meta options
@@ -45,19 +46,39 @@ class ClickhouseModel(models.Model):
         abstract = True
         base_manager_name = "_overwrite_base_manager"
 
-    def _do_update(
-        self,
-        base_qs,
-        using,
-        pk_val,
-        values,
-        update_fields,
-        forced_update,
-        returning_fields,
-    ):
-        filtered = base_qs.filter(pk=pk_val)
-        if not values:
-            if update_fields is not None or filtered.exists():
-                return [()]
-            return []
-        return filtered._update(values, returning_fields)
+    # Both branches are required while the package supports Django 5.0+ (see the
+    # classifiers in pyproject.toml and the tox matrix). Django 6.0 changed the
+    # contract Model._save_table relies on: _do_update gained returning_fields and
+    # returns the returned rows, while <6.0 passes six arguments and expects a bool.
+    # QuerySet._update follows the same split, so one signature cannot serve both.
+    if compat.dj_ge6:
+
+        def _do_update(
+            self,
+            base_qs,
+            using,
+            pk_val,
+            values,
+            update_fields,
+            forced_update,
+            returning_fields,
+        ):
+            filtered = base_qs.filter(pk=pk_val)
+            if not values:
+                if update_fields is not None or filtered.exists():
+                    return [()]
+                return []
+            return filtered._update(values, returning_fields)
+
+    else:
+
+        def _do_update(
+            self, base_qs, using, pk_val, values, update_fields, forced_update
+        ):
+            filtered = base_qs.filter(pk=pk_val)
+            if not values:
+                # Saving a model in an inheritance chain where update_fields targets
+                # no field of this model, or a PK-only model: the update succeeded as
+                # long as the row still exists.
+                return update_fields is not None or filtered.exists()
+            return filtered._update(values) > 0
